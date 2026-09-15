@@ -317,6 +317,7 @@ InitializeHardwareInfoWithGPIO (
     Status = GpioGetMultiple ((UINT32[]){49, 50}, 2, &MemType);
     if (EFI_ERROR (Status)) {
       DEBUG ((DEBUG_ERROR, "%a: GpioGetMultiple failed: %r\n", __FUNCTION__, Status));
+      HiiSetString(HiiHandle, STRING_TOKEN(STR_MEMORY_TYPE_VALUE), L"Read Error", NULL);
       return;
     }
     Decode2BitMemType (HiiHandle, MemType);
@@ -324,12 +325,13 @@ InitializeHardwareInfoWithGPIO (
     Status = GpioGetMultiple ((UINT32[]){49, 50, 57, 60}, 4, &MemType);
     if (EFI_ERROR (Status)) {
       DEBUG ((DEBUG_ERROR, "%a: GpioGetMultiple failed: %r\n", __FUNCTION__, Status));
+      HiiSetString(HiiHandle, STRING_TOKEN(STR_MEMORY_TYPE_VALUE), L"Read Error", NULL);
       return;
     }
     Decode4BitMemType (HiiHandle, MemType);
   } else {
     DEBUG ((DEBUG_ERROR, "%a: Unknown product: %a\n", __FUNCTION__, SystemProductName));
-    HiiSetString (HiiHandle, STRING_TOKEN (STR_MEMORY_TYPE_VALUE), L"Internal Error", NULL);
+    HiiSetString (HiiHandle, STRING_TOKEN (STR_MEMORY_TYPE_VALUE), L"Product Error", NULL);
   }
 }
 
