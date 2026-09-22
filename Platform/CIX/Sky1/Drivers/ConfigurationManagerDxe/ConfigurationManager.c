@@ -10,6 +10,7 @@
 #include <IndustryStandard/MemoryMappedConfigurationSpaceAccessTable.h>
 #include <IndustryStandard/SerialPortConsoleRedirectionTable.h>
 #include <Library/ArmLib.h>
+#include <Library/BaseLib.h>
 #include <Library/DebugLib.h>
 #include <Library/IoLib.h>
 #include <Library/PcdLib.h>
@@ -135,29 +136,67 @@ SetCpuMaxFreqOnExitBootService (
   }
 }
 
-/** Get the Cpu performace capability granularity
+/** Round a performance/frequency ratio without overflowing its numerator. */
+STATIC
+EFI_STATUS
+RoundCpcRatio (
+  IN  UINT64  Numerator,
+  IN  UINT64  Denominator,
+  OUT UINT32  *Result
+  )
+{
+  UINT64  Value;
+  UINT64  Remainder;
 
-  @param [in]      CpuID              the id of cpu
-  @param [in,out]  CpcGranularity     Cpu performace capability granularity, unit of Hz/perf_level
+  if (Denominator == 0) {
+    return EFI_COMPROMISED_DATA;
+  }
 
-  @retval EFI_SUCCESS   Success
+  Value = DivU64x64Remainder (Numerator, Denominator, &Remainder);
+  if (Remainder >= Denominator - Remainder) {
+    Value++;
+  }
+
+  if ((Value == 0) || (Value > MAX_UINT32)) {
+    return EFI_COMPROMISED_DATA;
+  }
+
+  *Result = (UINT32)Value;
+  return EFI_SUCCESS;
+}
+
+/** Get frequency and reference performance values from the active SCMI scale.
+
+  SCMI reports the sustained frequency in kHz. Sky1's AMU reference counter
+  runs at 1 GHz; its _CPC performance value must use the same scale as the
+  current SCMI levels, including when PM rejects a requested custom table.
 **/
 STATIC
 EFI_STATUS
-GetCpcGranularity (
-  IN     UINTN   CpuID,
-  IN OUT UINT32  *CpcGranularity
+GetCpcFrequencyData (
+  IN  UINTN   CpuID,
+  IN  UINT32  LowestPerf,
+  IN  UINT32  NominalPerf,
+  OUT UINT32  *ReferencePerf,
+  OUT UINT32  *LowestFrequency,
+  OUT UINT32  *NominalFrequency
   )
 {
   EFI_STATUS                          Status;
   SCMI_PERFORMANCE_PROTOCOL           *ScmiPerfProtocol = NULL;
   UINT32                              DomainId;
+  UINT64                              Reference;
+  UINT32                              Lowest;
+  UINT32                              Nominal;
   AML_PSD_INFO                        PsdInfo[PLAT_CPU_COUNT] = PLAT_PSD_INFO;
   SCMI_PERFORMANCE_DOMAIN_ATTRIBUTES  DomainAttribute;
 
   if (CpuID >= PLAT_CPU_COUNT) {
-    DEBUG ((DEBUG_ERROR, "Cpuid is over the max range, max cpuid = %d, current cpu id = %d\n", PLAT_CPU_COUNT - 1, CpuID));
     return EFI_INVALID_PARAMETER;
+  }
+
+  if ((LowestPerf == 0) || (LowestPerf > NominalPerf)) {
+    return EFI_COMPROMISED_DATA;
   }
 
   Status = gBS->LocateProtocol (
@@ -171,16 +210,47 @@ GetCpcGranularity (
   }
 
   DomainId = PsdInfo[CpuID].Domain;
-
   Status = ScmiPerfProtocol->GetDomainAttributes (ScmiPerfProtocol, DomainId, &DomainAttribute);
   if (EFI_ERROR (Status)) {
-    DEBUG ((DEBUG_ERROR, "Perfomance [%d] get domain attributes failed.\n", DomainId));
+    DEBUG ((DEBUG_ERROR, "Performance [%d] get domain attributes failed.\n", DomainId));
     return Status;
   }
 
-  *CpcGranularity = (DomainAttribute.SustainedFreq*1000) / DomainAttribute.SustainedPerfLevel;
-  DEBUG ((DEBUG_INFO, "CpcGranularity = %d\n", *CpcGranularity));
-  return Status;
+  if ((DomainAttribute.SustainedFreq == 0) || (DomainAttribute.SustainedPerfLevel == 0)) {
+    return EFI_COMPROMISED_DATA;
+  }
+
+  // Match PM's truncation of the reference level; round only MHz fields.
+  Reference = DivU64x32 (
+                (UINT64)DomainAttribute.SustainedPerfLevel * 1000000,
+                DomainAttribute.SustainedFreq
+                );
+  if ((Reference == 0) || (Reference > MAX_UINT32)) {
+    return EFI_COMPROMISED_DATA;
+  }
+
+  Status = RoundCpcRatio (
+             (UINT64)LowestPerf * DomainAttribute.SustainedFreq,
+             (UINT64)DomainAttribute.SustainedPerfLevel * 1000,
+             &Lowest
+             );
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  Status = RoundCpcRatio (
+             (UINT64)NominalPerf * DomainAttribute.SustainedFreq,
+             (UINT64)DomainAttribute.SustainedPerfLevel * 1000,
+             &Nominal
+             );
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  *ReferencePerf    = (UINT32)Reference;
+  *LowestFrequency  = Lowest;
+  *NominalFrequency = Nominal;
+  return EFI_SUCCESS;
 }
 
 STATIC
@@ -208,9 +278,16 @@ GetCpuPerfData (
   Status   = GetPerfDomainLevelArra (DomainId, &LevelArra, &NumLevels);
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "Performance domain [%d] get performance level data failed.\n", DomainId));
+    return Status;
   }
 
-  for (UINT8 i = 0; i < NumLevels; i++) {
+  if ((LevelArra == NULL) || (NumLevels == 0) ||
+      (LevelArra[0].Level == 0) ||
+      (LevelArra[0].Level > LevelArra[NumLevels-1].Level)) {
+    return EFI_COMPROMISED_DATA;
+  }
+
+  for (UINT32 i = 0; i < NumLevels; i++) {
     DEBUG (
       (
        DEBUG_INFO,
@@ -258,7 +335,9 @@ InitializeCmArmCpcInfo (
   UINT32           LowestPerf;
   UINT32           i;
   UINT32           CpuCoreMask, MaxCpuCoreNum;
-  UINT32           CpcGranularity;
+  UINT32           ReferencePerf;
+  UINT32           LowestFrequency;
+  UINT32           NominalFrequency;
 
   GetCpuCoreMask (&CpuCoreMask, &MaxCpuCoreNum);
 
@@ -272,14 +351,20 @@ InitializeCmArmCpcInfo (
     // Get CPU performace parameter
     Status = GetCpuPerfData (i, &HighestPerf, &NominalPerf, &LowestNonlinearPerf, &LowestPerf);
     if (EFI_ERROR (Status)) {
-      DEBUG ((DEBUG_ERROR, "Get CPU%d performance data fail!\n"));
+      DEBUG ((DEBUG_ERROR, "Get CPU%d performance data fail!\n", i));
       continue;
     }
 
-    // Get CPU performace granularity
-    Status = GetCpcGranularity (i, &CpcGranularity);
+    Status = GetCpcFrequencyData (
+               i,
+               LowestPerf,
+               NominalPerf,
+               &ReferencePerf,
+               &LowestFrequency,
+               &NominalFrequency
+               );
     if (EFI_ERROR (Status)) {
-      DEBUG ((DEBUG_ERROR, "Get CPU%d performance granularity fail!\n"));
+      DEBUG ((DEBUG_ERROR, "Get CPU%d frequency data fail!\n", i));
       continue;
     }
 
@@ -287,8 +372,9 @@ InitializeCmArmCpcInfo (
     CpuCpcInfo[i].NominalPerformanceInteger         = NominalPerf;
     CpuCpcInfo[i].LowestNonlinearPerformanceInteger = LowestNonlinearPerf;
     CpuCpcInfo[i].LowestPerformanceInteger          = LowestPerf;
-    CpuCpcInfo[i].LowestFrequencyInteger            = ROUND_DIVISION (LowestPerf * CpcGranularity, 1000000);
-    CpuCpcInfo[i].NominalFrequencyInteger           = ROUND_DIVISION (NominalPerf * CpcGranularity, 1000000);
+    CpuCpcInfo[i].ReferencePerformanceInteger       = ReferencePerf;
+    CpuCpcInfo[i].LowestFrequencyInteger            = LowestFrequency;
+    CpuCpcInfo[i].NominalFrequencyInteger           = NominalFrequency;
     DEBUG ((DEBUG_INFO, "LowestFrequencyInteger = %d\n", CpuCpcInfo[i].LowestFrequencyInteger));
     DEBUG ((DEBUG_INFO, "NominalFrequencyInteger = %d\n", CpuCpcInfo[i].NominalFrequencyInteger));
   }
