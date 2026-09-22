@@ -1,0 +1,83 @@
+/** @file
+  CIX v3 PM configuration profile updater definitions.
+
+  SPDX-License-Identifier: BSD-2-Clause-Patent
+**/
+
+#ifndef CIX_PM_CONFIG_UPDATE_DXE_H_
+#define CIX_PM_CONFIG_UPDATE_DXE_H_
+
+#include <Uefi.h>
+#include <RadxaSetupVar.h>
+
+#define PM_CONFIG_BIN_SIZE                 4096U
+#define PM_CONFIG_VERSION_MAJOR_OFFSET     0U
+#define PM_CONFIG_VERSION_MINOR_OFFSET     2U
+#define PM_CONFIG_LENGTH_OFFSET            8U
+#define PM_CONFIG_SIGNATURE_OFFSET         12U
+#define PM_CONFIG_CRC1_OFFSET              16U
+#define PM_CONFIG_CRC2_OFFSET              20U
+#define PM_CONFIG_PMIC_VALID_OFFSET        24U
+#define PM_CONFIG_SIGNATURE                SIGNATURE_32 ('P', 'M', 'C', 'F')
+#define PM_CONFIG_SCHEMA_MAJOR             3U
+#define PM_CONFIG_SCHEMA_MINOR             0U
+
+#define PM_CONFIG_OPP_VALID_OFFSET         152U
+#define PM_CONFIG_OPP_DOMAIN_BASE_OFFSET   153U
+#define PM_CONFIG_OPP_ENTRY_COUNT          13U
+#define PM_CONFIG_OPP_ENTRY_SIZE           16U
+#define PM_CONFIG_OPP_DOMAIN_HEADER_SIZE   4U
+#define PM_CONFIG_OPP_DOMAIN_SIZE          \
+  (PM_CONFIG_OPP_DOMAIN_HEADER_SIZE +      \
+   PM_CONFIG_OPP_ENTRY_COUNT * PM_CONFIG_OPP_ENTRY_SIZE)
+
+#define PM_CONFIG_OPP_DOMAIN_OFFSET(Domain)  \
+  (PM_CONFIG_OPP_DOMAIN_BASE_OFFSET +        \
+   (Domain) * PM_CONFIG_OPP_DOMAIN_SIZE)
+#define PM_CONFIG_OPP_ENTRY_OFFSET(Domain, Opp)  \
+  (PM_CONFIG_OPP_DOMAIN_OFFSET (Domain) +        \
+   PM_CONFIG_OPP_DOMAIN_HEADER_SIZE +            \
+   (Opp) * PM_CONFIG_OPP_ENTRY_SIZE)
+
+#define PM_CONFIG_OPP_LEVEL_OFFSET         0U
+#define PM_CONFIG_OPP_VOLTAGE_OFFSET       4U
+#define PM_CONFIG_OPP_FREQUENCY_OFFSET     8U
+#define PM_CONFIG_OPP_POWER_OFFSET         12U
+
+#define PM_CONFIG_OPP_EXTERNAL_INVALID     1U
+#define PM_CONFIG_OPP_EXTERNAL_PARTIAL     0x80U
+#define PM_CONFIG_OPP_CPU_OC_LEGACY        0xC0U
+#define PM_CONFIG_OPP_CPU_OC               0xC1U
+#define PM_CONFIG_LITTLE_DOMAIN            2U
+#define PM_CONFIG_OPP_DOMAIN_DISABLED      0xFFFFU
+#define PM_CONFIG_OPP_DOMAIN_COUNT         13U
+
+#define PM_CONFIG_CPU_DOMAIN_COUNT         4U
+#define PM_CONFIG_MEASURED_POINT_COUNT     7U
+#define PM_CONFIG_CPU_BOOT_LEVEL           1500U
+#define PM_CONFIG_CPU_BOOT_VOLTAGE         790U
+#define PM_CONFIG_CPU_PROTECTED_INDEX      2U
+#define PM_CONFIG_SCHEMA_MIN_LENGTH       3340U
+
+#define PM_CONFIG_CPU_FREQUENCY_MIN        800U
+#define PM_CONFIG_CPU_FREQUENCY_MAX        3200U
+#define PM_CONFIG_CPU_VOLTAGE_MIN          550U
+#define PM_CONFIG_CPU_VOLTAGE_MAX          1250U
+#define PM_CONFIG_CPU_POWER_MAX            100000U
+#define PM_CONFIG_LITTLE_FREQUENCY_MIN     1800U
+#define PM_CONFIG_LITTLE_FREQUENCY_MAX     2400U
+#define PM_CONFIG_LITTLE_VOLTAGE_MIN       550U
+#define PM_CONFIG_LITTLE_VOLTAGE_MAX       950U
+
+VOID PmInitializeSettings (OUT RADXA_PM_TUNING_DATA *Settings);
+BOOLEAN PmMigrateLegacySettings (IN OUT RADXA_PM_TUNING_DATA *Settings);
+BOOLEAN PmSettingsAreValid (IN CONST RADXA_PM_TUNING_DATA *Settings);
+BOOLEAN PmConfigHeaderIsValid (IN CONST UINT8 *Buffer);
+BOOLEAN PmValidateConfig (IN CONST UINT8 *Buffer);
+BOOLEAN PmConfigIsCpuOwned (IN CONST UINT8 *Buffer);
+BOOLEAN PmProfileMatches (IN CONST UINT8 *Buffer, IN CONST RADXA_PM_TUNING_DATA *Settings);
+BOOLEAN PmApplyProfile (IN OUT UINT8 *Buffer, IN CONST RADXA_PM_TUNING_DATA *Settings);
+UINT8 PmSavedProfile (IN CONST UINT8 *Buffer);
+VOID PmReadRuntimeStatus (IN CONST UINT8 *Config, IN OUT RADXA_PM_STATUS_DATA *State);
+
+#endif

@@ -1,0 +1,41 @@
+## @file
+# Shared Radxa CPU PM policy and persistence updater.
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+[Defines]
+  INF_VERSION = 0x00010019
+  BASE_NAME = PmConfigUpdateDxe
+  FILE_GUID = e93742f2-cd38-4faa-9fea-26e637a3c45c
+  MODULE_TYPE = DXE_DRIVER
+  VERSION_STRING = 1.0
+  ENTRY_POINT = PmConfigUpdateDxeEntryPoint
+[Sources]
+  PmConfigUpdateDxe.c
+  PmConfigPolicy.c
+  PmConfigRuntime.c
+  PmConfigUpdateDxe.h
+  CixCpuOcExpected.h
+[Packages]
+  MdePkg/MdePkg.dec
+  ArmPkg/ArmPkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  CryptoPkg/CryptoPkg.dec
+  Platform/Radxa/Radxa.dec
+  Platform/CIX/Sky1/Sky1.dec
+  Silicon/CIX/Sky1/CixPkg.dec
+[LibraryClasses]
+  ArmMtlLib
+  BaseCryptLib
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  MemoryAllocationLib
+  UefiBootServicesTableLib
+  UefiRuntimeServicesTableLib
+  UefiDriverEntryPoint
+[Protocols]
+  gCixFirmwareUpdateProtocolGuid
+[Guids]
+  gRadxaSetupVariableGuid
+[Depex]
+  gCixFirmwareUpdateProtocolGuid

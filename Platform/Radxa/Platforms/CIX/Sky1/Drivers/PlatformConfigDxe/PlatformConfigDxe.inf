@@ -26,6 +26,8 @@
   PlatformConfigDxe.c
   PlatformConfigHii.vfr
   PlatformConfigHii.uni
+  PmMenu/PmConfig.hfr
+  PmMenu/PmConfig.uni
   Platform/CIX/Sky1/Drivers/SetupManagerDxe/MemMenu/MemoryConfig.hfr
   Platform/CIX/Sky1/Drivers/SetupManagerDxe/MemMenu/MemoryConfig.uni
   Platform/CIX/Sky1/Drivers/SetupManagerDxe/PcieMenu/PcieConfig.hfr

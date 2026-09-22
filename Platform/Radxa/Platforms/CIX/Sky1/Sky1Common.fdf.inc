@@ -15,6 +15,12 @@
   INF Platform/Radxa/Platforms/CIX/Sky1/Drivers/PlatformConfigDxe/PlatformConfigDxe.inf
 !endif
 
+!ifdef RADXA_CPU_OC_SUPPORT
+!if $(RADXA_CPU_OC_SUPPORT) == TRUE
+  INF Platform/Radxa/Platforms/CIX/Sky1/Drivers/PmConfigUpdateDxe/PmConfigUpdateDxe.inf
+!endif
+!endif
+
 !if $(FW_CONFIG_UPDATE_SUPPORT) == TRUE
   INF Platform/Radxa/Platforms/CIX/Sky1/Drivers/RadxaSetupVariableInitDxe/RadxaSetupVariableInitDxe.inf
   INF Platform/Radxa/Platforms/CIX/Sky1/Drivers/FirmwareConfigUpdateDxe/FirmwareConfigUpdateDxe.inf

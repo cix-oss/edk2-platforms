@@ -13,6 +13,8 @@
 #include "PlatformConfigHii.h"
 #include "../../Include/RadxaSetupVar.h"
 
+#define PM_CONFIG_FORM_ID 0x2017
+
 formset
   guid      = PLATFORM_CONFIG_FORMSET_GUID,
   title     = STRING_TOKEN(STR_FORM_SET_TITLE),
@@ -38,6 +40,18 @@ formset
     attribute = EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_NON_VOLATILE,
     name  = RadxaSetupVar,
     guid  = RADXA_SETUP_VARIABLE_GUID;
+
+#if (RADXA_CPU_OC_SUPPORT == 1)
+  efivarstore RADXA_PM_TUNING_DATA,
+    attribute = EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_NON_VOLATILE,
+    name = RadxaCpuOcVar,
+    guid = RADXA_SETUP_VARIABLE_GUID;
+
+  efivarstore RADXA_PM_STATUS_DATA,
+    attribute = EFI_VARIABLE_BOOTSERVICE_ACCESS,
+    name = RadxaCpuOcStatusVar,
+    guid = RADXA_SETUP_VARIABLE_GUID;
+#endif
 
   efivarstore CONSOLE_PREF_VARSTORE_DATA,
     attribute = EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_NON_VOLATILE,
@@ -77,6 +91,12 @@ suppressif ideqval DtAcpiPref.Pref == DT_ACPI_SELECT_DT;
       prompt = STRING_TOKEN(STR_ADVANCED_FORM_SET_TITLE),
       help = STRING_TOKEN(STR_ADVANCED_FORM_SET_TITLE_HELP);
 endif;
+
+#if (RADXA_CPU_OC_SUPPORT == 1)
+    goto PM_CONFIG_FORM_ID,
+      prompt = STRING_TOKEN(STR_PM_TITLE),
+      help = STRING_TOKEN(STR_PM_HELP);
+#endif
 
     goto COMPLIANCE_CONFIG_FORM_ID,
       prompt = STRING_TOKEN(STR_COMPLIANCE_FORM_SET_TITLE),
@@ -230,5 +250,9 @@ endif;
 #include "CpuConfig.hfr"
 // #include "GmacConfig.hfr"
 #include "ComplianceConfig.hfr"
+
+#if (RADXA_CPU_OC_SUPPORT == 1)
+#include "PmMenu/PmConfig.hfr"
+#endif
 
 endformset;

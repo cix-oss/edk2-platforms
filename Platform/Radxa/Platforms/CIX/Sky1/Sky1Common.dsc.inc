@@ -63,6 +63,12 @@
   Platform/Radxa/Platforms/CIX/Sky1/Drivers/PlatformConfigDxe/PlatformConfigDxe.inf
 !endif
 
+!ifdef RADXA_CPU_OC_SUPPORT
+!if $(RADXA_CPU_OC_SUPPORT) == TRUE
+  Platform/Radxa/Platforms/CIX/Sky1/Drivers/PmConfigUpdateDxe/PmConfigUpdateDxe.inf
+!endif
+!endif
+
 !if $(FW_CONFIG_UPDATE_SUPPORT) == TRUE
   Platform/Radxa/Platforms/CIX/Sky1/Drivers/RadxaSetupVariableInitDxe/RadxaSetupVariableInitDxe.inf
   Platform/Radxa/Platforms/CIX/Sky1/Drivers/FirmwareConfigUpdateDxe/FirmwareConfigUpdateDxe.inf
@@ -122,4 +128,12 @@
 !else
   MdeModulePkg/Universal/EsrtDxe/EsrtDxe.inf
   Platform/CIX/Sky1/Drivers/SystemFirmwareUpdate/SystemFirmwareReportDxe.inf
+!endif
+
+[BuildOptions]
+!ifdef RADXA_CPU_OC_SUPPORT
+!if $(RADXA_CPU_OC_SUPPORT) == TRUE
+  GCC:*_*_*_CC_FLAGS    = -DRADXA_CPU_OC_SUPPORT=1
+  GCC:*_*_*_VFRPP_FLAGS = -DRADXA_CPU_OC_SUPPORT=1
+!endif
 !endif
