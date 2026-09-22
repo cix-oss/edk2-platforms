@@ -729,11 +729,13 @@ LocateNorFlashDiskIoProtocol (
         DEBUG ((DEBUG_INFO, "[FwU] locate NorFlash DiskIoProtocol success\n"));
         Instance       = INSTANCE_FROM_DISKIO_THIS (NorFlashDiskIo);
         FlashBlockSize = Instance->Media.BlockSize;
+        FreePool (DiskIoHandles);
         return EFI_SUCCESS;
       }
     }
   }
 
+  FreePool (DiskIoHandles);
   if (Index == NumberDiskIoHandles) {
     DEBUG ((DEBUG_INFO, "[FwU]Not found NorFlash device.\n"));
     return EFI_NOT_FOUND;
@@ -968,101 +970,263 @@ CixFirmwareRawEntryUpdateNull (
   return FIRMWARE_RET_FUNC_NOT_FOUND;
 }
 
-// Type      : 3/4/5
-// ImageSize : entry size
-// UpateState: 1 - protram ; 0 - erase ; 2 - read
+/**
+  Locate a raw entry without using the full-image updater's mutable state.
+
+  The on-board directory is a single 4 KiB sector. Validate its bounds before
+  dereferencing entries and reject an ambiguous or overlapping target.
+**/
+STATIC
+UINT16
+CixFindRawFirmwareEntry (
+  IN  UINT8   Type,
+  OUT UINT32  *EntryAddress,
+  OUT UINT32  *EntrySize
+  )
+{
+  EFI_STATUS          Status;
+  NOR_FLASH_INSTANCE  *Instance;
+  FIRMWARE_HEADER     *Header;
+  FIRMWARE_ENTRY      *Entry;
+  FIRMWARE_ENTRY      *Selected;
+  UINT8               *Buffer;
+  UINT32              HeaderOffset;
+  UINT32              AccessSize;
+  UINT32              Index;
+  UINT16              Result;
+
+  Status = LocateNorFlashDiskIoProtocol ();
+  if (EFI_ERROR (Status)) {
+    return FIRMWARE_RET_NO_FLASH_PROG_PROTOCOL;
+  }
+
+  Instance = INSTANCE_FROM_DISKIO_THIS (NorFlashDiskIo);
+  if ((Instance->Size < SIZE_4KB) ||
+      (FIRMWARE_HEADER_OFFSET > Instance->Size - SIZE_4KB))
+  {
+    return FIRMWARE_RET_ERR_LAYOUT;
+  }
+
+  Buffer = AllocateZeroPool (SIZE_4KB);
+  if (Buffer == NULL) {
+    return FIRMWARE_RET_OUT_OF_RESOURCE;
+  }
+
+  Result       = FIRMWARE_RET_READ_ERR;
+  HeaderOffset = FIRMWARE_HEADER_OFFSET;
+  Status       = CixFlashReadWrapper (HeaderOffset, SIZE_4KB, Buffer);
+  if (EFI_ERROR (Status)) {
+    goto Done;
+  }
+
+  Header = (FIRMWARE_HEADER *)Buffer;
+  if (Header->Signature != FIRMWARE_HEADER_SIGNATURE) {
+    Result = FIRMWARE_RET_ERR_LAYOUT;
+    if (FIRMWARE_HEADER_OFFSET_ALT > Instance->Size - SIZE_4KB) {
+      goto Done;
+    }
+
+    HeaderOffset = FIRMWARE_HEADER_OFFSET_ALT;
+    Result       = FIRMWARE_RET_READ_ERR;
+    Status       = CixFlashReadWrapper (HeaderOffset, SIZE_4KB, Buffer);
+    if (EFI_ERROR (Status)) {
+      goto Done;
+    }
+  }
+
+  Result = FIRMWARE_RET_ERR_HEADER;
+  if ((Header->Signature != FIRMWARE_HEADER_SIGNATURE) ||
+      ((Header->ControlFlag & UPDATE_OTA_PACKAGE) != 0) ||
+      (Header->EntryCount == 0) ||
+      (Header->EntryCount > ARRAY_SIZE (((CIX_FWUP_PRIVATE_DATA *)0)->ImageFwEntryInfo)) ||
+      (Header->EntryCount > (SIZE_4KB - OFFSET_OF (FIRMWARE_HEADER, EntryNode)) / sizeof (FIRMWARE_ENTRY)))
+  {
+    goto Done;
+  }
+
+  Selected = NULL;
+  Result   = FIRMWARE_RET_ERR_LAYOUT;
+  for (Index = 0; Index < Header->EntryCount; Index++) {
+    Entry = &Header->EntryNode[Index];
+    if ((Entry->Length == 0) || (Entry->Base > Instance->Size) ||
+        (Entry->Length > Instance->Size - Entry->Base))
+    {
+      goto Done;
+    }
+
+    if (Entry->Type == Type) {
+      if (Selected != NULL) {
+        goto Done;
+      }
+
+      Selected = Entry;
+    }
+  }
+
+  Result = FIRMWARE_RET_TYPE_NOT_FOUND;
+  if (Selected == NULL) {
+    goto Done;
+  }
+
+  Result = FIRMWARE_RET_ERR_4KB_ALIGN;
+  if ((Selected->Base % SIZE_4KB) != 0) {
+    goto Done;
+  }
+
+  // Legacy config callers operate on the full reserved sector even when the
+  // directory records only the occupied bytes (for example, memory config).
+  AccessSize = (Type == FIRMWARE_TYPE_BootLoader_1) ? Selected->Length : SIZE_4KB;
+  Result     = FIRMWARE_RET_ERR_LAYOUT;
+  if (AccessSize > Instance->Size - Selected->Base) {
+    goto Done;
+  }
+
+  if (((UINT64)Selected->Base < (UINT64)HeaderOffset + SIZE_4KB) &&
+      ((UINT64)HeaderOffset < (UINT64)Selected->Base + AccessSize))
+  {
+    goto Done;
+  }
+
+  for (Index = 0; Index < Header->EntryCount; Index++) {
+    Entry = &Header->EntryNode[Index];
+    if ((Entry != Selected) &&
+        ((UINT64)Selected->Base < (UINT64)Entry->Base + Entry->Length) &&
+        ((UINT64)Entry->Base < (UINT64)Selected->Base + AccessSize))
+    {
+      goto Done;
+    }
+  }
+
+  *EntryAddress = Selected->Base;
+  *EntrySize    = Selected->Length;
+  Result        = FIRMWARE_RET_SUCCESS;
+
+Done:
+  FreePool (Buffer);
+  return Result;
+}
+
+/**
+  Read a complete payload or access a reserved configuration sector.
+
+  Protocol version 3 adds read-only bootloader 1 access for payload identity
+  checks. Legacy memory, TFA, and debug operations access the first 4 KiB
+  sector, independently of the nonzero occupied entry length in the directory.
+  PM configuration must occupy the complete sector. Return the entry type in
+  the high byte and a FIRMWARE_RETURN_VALUE in the low byte, including success.
+  Verification resources are allocated before modifying flash.
+**/
 UINT16
 CixFirmwareRawEntryUpdate (
-  UINT8                      Type,
-  UINT8                      *pEntryImage,
-  UINT32                     ImageSize,
-  ENTRY_UPDATE_METHOD        UpateState,
+  UINT8                                        Type,
+  UINT8                                        *pEntryImage,
+  UINT32                                       ImageSize,
+  ENTRY_UPDATE_METHOD                          UpateState,
   EFI_FIRMWARE_MANAGEMENT_UPDATE_IMAGE_PROGRESS  CallBackFunc
   )
 {
-  EFI_STATUS               Status = EFI_SUCCESS;
-  UINT32                   dwflag = 0;
-  UINT8                    RetVal;
-  UINT8                    *pImageBuffer;
-  UINT16                   ReturnCode;
-  UINT32                   Index;
-  CIX_FIRMWARE_ENTRY_INFO  *pEntryInfo;
-  UINT32                   EntryOnboardSize;
-  UINT32                   EntryOnboardAddress;
+  EFI_STATUS  Status;
+  UINT8       *VerifyBuffer;
+  UINT8       *EraseBuffer;
+  UINT8       *WriteBuffer;
+  UINT16      Result;
+  UINT16      TypeCode;
+  UINT32      EntryAddress;
+  UINT32      EntrySize;
 
-  DEBUG ((DEBUG_ERROR, "type:%d,ImageSize:0x%x\n", Type, ImageSize));
-
-  /*
+  TypeCode = (UINT16)Type << 8;
+  if ((UpateState != ENTRY_READ) && (UpateState != ENTRY_WRITE) &&
+      (UpateState != ENTRY_ERASE))
   {
-    UINT32 i;
-    pBuffer = (CHAR8*)pImageBuff;
-    for(i=0;i<256;i++,pBuffer++){
+    return TypeCode | FIRMWARE_RET_ERR_INPUT;
+  }
 
-      DEBUG ((DEBUG_INFO, "%02x ",*pBuffer));
-      if ( (i+1)%16 == 0 ){
-       DEBUG ((DEBUG_INFO, " \n"));
-      }
+  if ((UpateState != ENTRY_ERASE) && (pEntryImage == NULL)) {
+    return TypeCode | FIRMWARE_RET_ERR_INPUT;
+  }
 
+  if (Type == FIRMWARE_TYPE_BootLoader_1) {
+    if ((UpateState != ENTRY_READ) || (ImageSize == 0) || (ImageSize > SIZE_1MB)) {
+      return TypeCode | FIRMWARE_RET_ERR_INPUT;
     }
-  } */
-
-  if (((Type != FIRMWARE_TYPE_SECURE_DEBUG) && (Type != FIRMWARE_TYPE_MEM_CONF) && (Type != FIRMWARE_TYPE_PM_CONF) && \
-       (Type != FIRMWARE_TYPE_TFA_CONF)) || (ImageSize != SIZE_4KB)) {
-    ReturnCode = Type << 8 | FIRMWARE_RET_ERR_INPUT;
-    return ReturnCode;
+  } else if (((Type != FIRMWARE_TYPE_SECURE_DEBUG) && (Type != FIRMWARE_TYPE_MEM_CONF) &&
+              (Type != FIRMWARE_TYPE_PM_CONF) && (Type != FIRMWARE_TYPE_TFA_CONF)) ||
+             (ImageSize != SIZE_4KB))
+  {
+    return TypeCode | FIRMWARE_RET_ERR_INPUT;
   }
 
-  ReturnCode = CixFirmwareUpdateOnboardHeaderParse ();
-  if (ReturnCode != FIRMWARE_RET_SUCCESS) {
-    return (Type << 8 | ReturnCode);
+  Result = CixFindRawFirmwareEntry (Type, &EntryAddress, &EntrySize);
+  if (Result != FIRMWARE_RET_SUCCESS) {
+    return TypeCode | Result;
   }
 
-  ReturnCode = Type << 8;
-  pEntryInfo = pFwPrivateData->ImageFwEntryInfo;
-  for (Index = 0; Index < pFwPrivateData->EntryCount; Index++) {
-    if (Type == pEntryInfo->Type) {
-      EntryOnboardAddress = pEntryInfo->EntryImageOffset;
-      EntryOnboardSize    = pEntryInfo->EntryImageSize;
-      // Found            = TRUE;
-      break;
+  if (((Type == FIRMWARE_TYPE_BootLoader_1) && (ImageSize != EntrySize)) ||
+      ((Type == FIRMWARE_TYPE_PM_CONF) && (EntrySize != SIZE_4KB)))
+  {
+    return TypeCode | FIRMWARE_RET_ERR_SIZE;
+  }
+
+  if (UpateState == ENTRY_READ) {
+    Status = CixFlashReadWrapper (EntryAddress, ImageSize, pEntryImage);
+    return TypeCode | (EFI_ERROR (Status) ? FIRMWARE_RET_READ_ERR : FIRMWARE_RET_SUCCESS);
+  }
+
+  VerifyBuffer = AllocateZeroPool (ImageSize);
+  if (VerifyBuffer == NULL) {
+    return TypeCode | FIRMWARE_RET_OUT_OF_RESOURCE;
+  }
+
+  EraseBuffer = NULL;
+  WriteBuffer = pEntryImage;
+  Result      = FIRMWARE_RET_OUT_OF_RESOURCE;
+  if (UpateState == ENTRY_ERASE) {
+    EraseBuffer = AllocatePool (ImageSize);
+    if (EraseBuffer == NULL) {
+      goto Done;
     }
 
-    pEntryInfo++;
+    SetMem (EraseBuffer, ImageSize, 0xff);
+    WriteBuffer = EraseBuffer;
   }
 
-  switch (UpateState) {
-    case ENTRY_ERASE:
-      pImageBuffer = AllocateZeroPool (SIZE_4KB);
-      SetMem (pImageBuffer, SIZE_4KB, 0xff);
-      RetVal = CixFlashWriteWrapper (Type, pImageBuffer, SIZE_4KB, dwflag, EntryOnboardAddress);
-      FreePool (pImageBuffer);
-      break;
-    case ENTRY_WRITE:
-      RetVal = CixFlashWriteWrapper (Type, pEntryImage, SIZE_4KB, dwflag, EntryOnboardAddress);
-      break;
-    case ENTRY_READ:
-      Status = CixFlashReadWrapper (EntryOnboardAddress, ImageSize, pEntryImage);
-      if (EFI_ERROR (Status)) {
-        DEBUG ((DEBUG_ERROR, "%a: status %r\n", __FUNCTION__, Status));
-        return FIRMWARE_RET_READ_ERR;
-      }
-
-      break;
-    default:
-      ReturnCode = Type << 8 | FIRMWARE_RET_ERR_INPUT;
-      return ReturnCode;
+  Result = FIRMWARE_RET_READ_ERR;
+  Status = CixFlashReadWrapper (EntryAddress, ImageSize, VerifyBuffer);
+  if (EFI_ERROR (Status)) {
+    goto Done;
   }
 
-  ReturnCode |= RetVal;
-  if (FIRMWARE_RET_SUCCESS != RetVal) {
-    DEBUG ((DEBUG_INFO, "[FwU] Raw entry update failed\n"));
-
-    return ReturnCode;
+  Result = FIRMWARE_RET_SUCCESS;
+  if (CompareMem (WriteBuffer, VerifyBuffer, ImageSize) == 0) {
+    goto Done;
   }
 
-  DEBUG ((DEBUG_INFO, "[FwU] Raw entry update success\n"));
+  FwProgStatus.firmware_type = Type;
+  FwProgStatus.status_result = FIRMWARE_START;
+  Status = NorFlashDiskIo->WriteDisk (NorFlashDiskIo, MediaId, EntryAddress, ImageSize, WriteBuffer);
+  Result = FIRMWARE_RET_ERR_PROG;
+  if (EFI_ERROR (Status)) {
+    FwProgStatus.status_result = FIRMWARE_WRITE_FAILED;
+    goto Done;
+  }
 
-  return ReturnCode;
+  FwProgStatus.status_result = FIRMWARE_WRITE_SUCCESS;
+  Result = FIRMWARE_RET_ERR_VERIFY;
+  Status = CixFlashReadWrapper (EntryAddress, ImageSize, VerifyBuffer);
+  if (EFI_ERROR (Status) || (CompareMem (WriteBuffer, VerifyBuffer, ImageSize) != 0)) {
+    FwProgStatus.status_result = FIRMWARE_VERIFY_FAILED;
+    goto Done;
+  }
+
+  Result = FIRMWARE_RET_SUCCESS;
+
+Done:
+  if (EraseBuffer != NULL) {
+    FreePool (EraseBuffer);
+  }
+
+  FreePool (VerifyBuffer);
+  return TypeCode | Result;
 }
 
 UINT32
