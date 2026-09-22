@@ -452,52 +452,16 @@ form formid = PM_CONFIG_FORM_ID,
         minimum = 1800, maximum = 2400, step = 10,
         default = 1800,
       endnumeric;
-      oneof varid = RadxaCpuOcVar.LittleMinVoltage,
+      numeric varid = RadxaCpuOcVar.LittleMinVoltage,
         prompt = STRING_TOKEN(STR_PM_LITTLE_VOLT),
         help = STRING_TOKEN(STR_PM_LITTLE_VOLT_HELP),
-        option text = STRING_TOKEN(STR_PM_LITTLE_AUTO_VOLT), value = 0, flags = DEFAULT | RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_550), value = 550, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_560), value = 560, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_570), value = 570, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_580), value = 580, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_590), value = 590, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_600), value = 600, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_610), value = 610, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_620), value = 620, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_630), value = 630, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_640), value = 640, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_650), value = 650, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_660), value = 660, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_670), value = 670, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_680), value = 680, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_690), value = 690, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_700), value = 700, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_710), value = 710, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_720), value = 720, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_730), value = 730, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_740), value = 740, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_750), value = 750, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_760), value = 760, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_770), value = 770, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_780), value = 780, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_790), value = 790, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_800), value = 800, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_810), value = 810, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_820), value = 820, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_830), value = 830, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_840), value = 840, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_850), value = 850, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_860), value = 860, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_870), value = 870, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_880), value = 880, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_890), value = 890, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_900), value = 900, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_910), value = 910, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_920), value = 920, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_930), value = 930, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_940), value = 940, flags = RESET_REQUIRED;
-        option text = STRING_TOKEN(STR_PM_LITTLE_VOLT_950), value = 950, flags = RESET_REQUIRED;
-      endoneof;
+        flags = RESET_REQUIRED,
+        minimum = 0, maximum = 950, step = 10,
+        default = 0,
+        inconsistentif prompt = STRING_TOKEN(STR_PM_LITTLE_VOLT_INVALID),
+          pushthis != 0 AND (pushthis < 550 OR (pushthis % 10) != 0)
+        endif;
+      endnumeric;
     endif;
   endif;
   suppressif TRUE;

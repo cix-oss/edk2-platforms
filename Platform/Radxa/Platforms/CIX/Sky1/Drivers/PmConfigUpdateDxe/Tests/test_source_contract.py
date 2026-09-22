@@ -79,9 +79,25 @@ class SourceContractTests(unittest.TestCase):
         self.assertIn("minimum = 1800, maximum = 2400, step = 10,", frequency)
         self.assertIn("default = 1800,", frequency)
         voltage = re.search(
-            r"oneof varid = RadxaCpuOcVar\.LittleMinVoltage,(.*?)endoneof;", hii, re.S)[1]
-        self.assertEqual(list(map(int, re.findall(r"value = (\d+),", voltage))),
-                         [0] + list(range(550, 951, 10)))
+            r"numeric varid = RadxaCpuOcVar\.LittleMinVoltage,(.*?)endnumeric;", hii, re.S)[1]
+        header = (DRIVER / "PmConfigUpdateDxe.h").read_text()
+        lower = int(re.search(r"#define PM_CONFIG_LITTLE_VOLTAGE_MIN\s+(\d+)U", header)[1])
+        upper = int(re.search(r"#define PM_CONFIG_LITTLE_VOLTAGE_MAX\s+(\d+)U", header)[1])
+        limits = re.search(r"minimum = (\d+), maximum = (\d+), step = (\d+),", voltage)
+        minimum, maximum, step = map(int, limits.groups())
+        self.assertEqual((minimum, maximum, step), (0, upper, 10))
+        self.assertIn("default = 0,", voltage)
+        self.assertIn("flags = RESET_REQUIRED,", voltage)
+        condition = re.search(
+            r"inconsistentif prompt = STRING_TOKEN\(STR_PM_LITTLE_VOLT_INVALID\),\s*(.*?)\s*endif;",
+            voltage, re.S)[1]
+        expression = compile(condition.replace("AND", "and").replace("OR", "or"),
+                             "<LITTLE voltage validation>", "eval")
+        accepted = {
+            value for value in range(minimum, maximum + 1)
+            if not eval(expression, {"__builtins__": {}}, {"pushthis": value})
+        }
+        self.assertEqual(accepted, {0, *range(lower, upper + 1, 10)})
         mode = re.search(r"oneof varid = RadxaCpuOcVar\.LittleMode,(.*?)endoneof;", hii, re.S)[1]
         self.assertEqual(re.findall(r"value = (\d+),", mode), ["0", "2"])
         self.assertIn("grayoutif ideqval RadxaCpuOcVar.LittleMode == 0;", hii)
